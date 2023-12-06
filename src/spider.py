@@ -31,8 +31,8 @@ class Spider:
         website = self.add_scheme_to_url(website)
         async with self.rate_limit:
             try:
-                logger.info(f"Getting: {website}")
                 response = await client.get(website)
+                logger.info(f"Got: {website}")
                 content = response.text
             except Exception as e:
                 logger.error(e)
@@ -56,7 +56,7 @@ class Spider:
         self.keywords = self.load_keywords()
         websites = self.google_sheet.get_col_values("Website")
 
-        async with httpx.AsyncClient(follow_redirects=True, verify=False) as client:
+        async with httpx.AsyncClient(follow_redirects=True, verify=False, timeout=30) as client:
 
             tasks = []
             for website in websites[1:]:
