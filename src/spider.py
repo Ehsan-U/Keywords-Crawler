@@ -42,15 +42,13 @@ class Spider:
                 logger.info(f"Getting: {website}")
                 await page.goto(website, timeout=NAVIGATION_TIMEOUT)
                 await page.wait_for_timeout(timeout=WAIT_TIMEOUT)
-
+                content = await page.content()
             except TimeoutError:
-                pass
-
+                content = ''
             except Exception as e:
                 logger.error(e)
-
+                content = ''
             finally:
-                content = await page.content()
                 await page.close()
                 for keyword in self.keywords:
                     if keyword.lower() in content.lower():
