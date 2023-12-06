@@ -1,10 +1,10 @@
 import asyncio
 import os.path
-from playwright.async_api import async_playwright, TimeoutError
+import httpx
 from aiolimiter import AsyncLimiter
 
 from src.logger import logger
-from src.config import SHEET_ID, NAVIGATION_TIMEOUT, WAIT_TIMEOUT
+from src.config import SHEET_ID
 from src.utils import GoogleSheet
 
 
@@ -16,13 +16,6 @@ class Spider:
         self.rate_limit = AsyncLimiter(max_rate)
 
 
-    async def handle_route(self, route):
-        if route.request.resource_type in ['image']:
-            await route.abort()
-        else:
-            await route.continue_()
-
-
     @staticmethod
     def add_scheme_to_url(url: str, default_scheme='http://'):
         url = url.strip()
@@ -31,25 +24,20 @@ class Spider:
         return url
 
 
-    async def check_website(self, browser, website):
+    async def check_website(self, client, website):
         if not website:
             return ''
 
         website = self.add_scheme_to_url(website)
         async with self.rate_limit:
-            page = await browser.new_page()
             try:
                 logger.info(f"Getting: {website}")
-                await page.goto(website, timeout=NAVIGATION_TIMEOUT)
-                await page.wait_for_timeout(timeout=WAIT_TIMEOUT)
-                content = await page.content()
-            except TimeoutError:
-                content = ''
+                response = await client.get(website)
+                content = response.text
             except Exception as e:
                 logger.error(e)
                 content = ''
             finally:
-                await page.close()
                 for keyword in self.keywords:
                     if keyword.lower() in content.lower():
                         return 'Yes'
@@ -68,12 +56,11 @@ class Spider:
         self.keywords = self.load_keywords()
         websites = self.google_sheet.get_col_values("Website")
 
-        async with async_playwright() as p:
-            browser = await p.firefox.launch(headless=True)
+        async with httpx.AsyncClient(follow_redirects=True, verify=False) as client:
 
             tasks = []
-            for website in websites[1:50]:
-                task = asyncio.create_task(self.check_website(browser, website))
+            for website in websites[1:]:
+                task = asyncio.create_task(self.check_website(client, website))
                 tasks.append(task)
 
             answers = await asyncio.gather(*tasks)
