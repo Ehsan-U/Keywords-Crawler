@@ -1,6 +1,6 @@
 import asyncio
 import os.path
-from playwright.async_api import async_playwright, TimeoutError
+import httpx
 from aiolimiter import AsyncLimiter
 
 from src.logger import logger
@@ -31,27 +31,20 @@ class Spider:
         return url
 
 
-    async def check_website(self, browser, website):
+    async def check_website(self, client, website):
         if not website:
             return ''
 
         website = self.add_scheme_to_url(website)
         async with self.rate_limit:
-            page = await browser.new_page()
             try:
                 logger.info(f"Getting: {website}")
-                await page.goto(website, timeout=NAVIGATION_TIMEOUT)
-                await page.wait_for_timeout(timeout=WAIT_TIMEOUT)
-
-            except TimeoutError:
-                pass
-
+                response = await client.get(website)
+                content = response.text
             except Exception as e:
                 logger.error(e)
-
+                content = ''
             finally:
-                content = await page.content()
-                await page.close()
                 for keyword in self.keywords:
                     if keyword.lower() in content.lower():
                         return 'Yes'
@@ -70,12 +63,11 @@ class Spider:
         self.keywords = self.load_keywords()
         websites = self.google_sheet.get_col_values("Website")
 
-        async with async_playwright() as p:
-            browser = await p.firefox.launch(headless=True)
+        async with httpx.AsyncClient(follow_redirects=True, verify=False) as client:
 
             tasks = []
             for website in websites[1:50]:
-                task = asyncio.create_task(self.check_website(browser, website))
+                task = asyncio.create_task(self.check_website(client, website))
                 tasks.append(task)
 
             answers = await asyncio.gather(*tasks)
