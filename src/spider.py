@@ -1,20 +1,19 @@
 import asyncio
 import os.path
-from playwright.async_api import async_playwright
+from playwright.async_api import async_playwright, TimeoutError
 from aiolimiter import AsyncLimiter
 
 from src.logger import logger
-from src.config import SHEET_ID
+from src.config import SHEET_ID, NAVIGATION_TIMEOUT, WAIT_TIMEOUT
 from src.utils import GoogleSheet
 
 
 class Spider:
-    NAVIGATION_TIMEOUT: int = 60*1000
-    WAIT_TIMEOUT: int = 5*1000
 
 
-    def __init__(self):
+    def __init__(self, max_rate):
         self.google_sheet = GoogleSheet(SHEET_ID)
+        self.rate_limit = AsyncLimiter(max_rate)
 
 
     async def handle_route(self, route):
@@ -24,25 +23,39 @@ class Spider:
             await route.continue_()
 
 
-    async def init_playwright(self):
-        self.play = await async_playwright().start()
-        self.browser = await self.play.firefox.launch(headless=True)
-        self.page = await self.browser.new_page()
-        await self.page.route("**/*", self.handle_route)
+    @staticmethod
+    def add_scheme_to_url(url: str, default_scheme='http://'):
+        url = url.strip()
+        if not url.startswith(('http://', 'https://')):
+            url = default_scheme + url
+        return url
 
 
-    async def check_website(self, website):
-        try:
-            await self.page.goto(website, timeout=self.NAVIGATION_TIMEOUT)
-            await self.page.wait_for_timeout(timeout=self.WAIT_TIMEOUT)
-            content = await self.page.content()
+    async def check_website(self, browser, website):
+        if not website:
+            return ''
 
-            for keyword in self.keywords:
-                if keyword.lower() in content.lower():
-                    return 'Yes'
+        website = self.add_scheme_to_url(website)
+        async with self.rate_limit:
+            page = await browser.new_page()
+            try:
+                logger.info(f"Getting: {website}")
+                await page.goto(website, timeout=NAVIGATION_TIMEOUT)
+                await page.wait_for_timeout(timeout=WAIT_TIMEOUT)
 
-        except Exception as e:
-            logger.error(e)
+            except TimeoutError:
+                pass
+
+            except Exception as e:
+                logger.error(e)
+
+            finally:
+                content = await page.content()
+                await page.close()
+                for keyword in self.keywords:
+                    if keyword.lower() in content.lower():
+                        return 'Yes'
+                return "No"
 
 
     def load_keywords(self):
@@ -52,26 +65,23 @@ class Spider:
             keywords = f.read().split('\n')
         return keywords
 
+
     async def run(self):
-        answers = []
         self.keywords = self.load_keywords()
+        websites = self.google_sheet.get_col_values("Website")
+
+        async with async_playwright() as p:
+            browser = await p.firefox.launch(headless=True)
+
+            tasks = []
+            for website in websites[1:50]:
+                task = asyncio.create_task(self.check_website(browser, website))
+                tasks.append(task)
+
+            answers = await asyncio.gather(*tasks)
+
+        self.google_sheet.create_col(col_name="Answers", col_idx=12)
+        self.google_sheet.insert(col_name="Answers", values=answers)
 
 
 
-        await self.init_playwright()
-
-        websites = []
-        for website in websites:
-            answer = self.check_website(website)
-            answers.append(answer)
-
-        await self.close_playwright()
-
-
-    async def close_playwright(self):
-        await self.browser.close()
-        await self.play.stop()
-
-
-s = Spider()
-asyncio.run(s.run())

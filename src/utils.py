@@ -1,12 +1,11 @@
 import gspread
 from google.oauth2 import service_account
 
-from logger import logger
+from src.logger import logger
 
 
 class GoogleSheet:
     SERVICE_ACCOUNT_FILE = 'data/creds.json'
-    SHEET_ID = "1P_YE73JsqlSrJR1xOiaVohZmsa6FzRy_yuHdQSswc24"
     SCOPES = ['https://www.googleapis.com/auth/spreadsheets', "https://www.googleapis.com/auth/drive"]
     CREDENTIALS = service_account.Credentials.from_service_account_file(
         SERVICE_ACCOUNT_FILE, scopes=SCOPES
@@ -26,8 +25,7 @@ class GoogleSheet:
                 logger.debug(f"Column {col_name} already exists.")
                 return
 
-            self.worksheet.add_cols(1)
-            self.worksheet.update_cell(1, col_idx, col_name)
+            self.worksheet.insert_cols([[col_name]], col_idx)
 
             logger.debug(f"Column {col_name} is inserted.")
 
@@ -35,9 +33,11 @@ class GoogleSheet:
             logger.error(e)
 
 
-    def get_col_values(self, col: int):
+    def get_col_values(self, col_name: str):
         try:
-            websites = self.worksheet.col_values(col)
+            target_col = self.worksheet.find(col_name).col
+
+            websites = self.worksheet.col_values(target_col)
             return websites
 
         except Exception as e:
@@ -51,7 +51,7 @@ class GoogleSheet:
             cells = self.worksheet.range(2, target_col, len(values) + 1, target_col)
 
             for i, cell in enumerate(cells):
-                cell.value = values[i][0]
+                cell.value = values[i]
 
             self.worksheet.update_cells(cells)
             logger.debug("values inserted.")
